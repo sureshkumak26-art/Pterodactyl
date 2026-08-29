@@ -3,19 +3,13 @@ const config = require('./config');
 
 const api = axios.create({
   baseURL: `${config.pteroUrl}/api/application`,
-  headers: {
-    Authorization: `Bearer ${config.pteroApiKey}`,
-    Accept: 'Application/vnd.pterodactyl.v1+json',
-    'Content-Type': 'application/json'
-  },
+  headers: { Authorization: `Bearer ${config.pteroApiKey}`, Accept: 'Application/vnd.pterodactyl.v1+json', 'Content-Type': 'application/json' },
   timeout: 30000
 });
 
 async function request(method, path, data, params) {
-  try {
-    const r = await api.request({ method, url: path, data, params });
-    return r.data;
-  } catch (e) {
+  try { return (await api.request({ method, url: path, data, params })).data; }
+  catch (e) {
     const errors = e.response?.data?.errors;
     if (Array.isArray(errors)) throw new Error(errors.map(x => x.detail || x.code).join('\n'));
     throw new Error(e.response?.data?.message || e.message || `HTTP ${e.response?.status || 500}`);
@@ -36,6 +30,7 @@ module.exports = {
   getNodes: () => request('GET', '/nodes', undefined, { per_page: 100 }),
   getLocations: () => request('GET', '/locations', undefined, { per_page: 100 }),
   getNests: () => request('GET', '/nests', undefined, { include: 'eggs', per_page: 100 }),
+  getEgg: (nestId, eggId) => request('GET', `/nests/${nestId}/eggs/${eggId}`, undefined, { include: 'variables' }),
   getEggs: (nestId) => request('GET', `/nests/${nestId}/eggs`, undefined, { per_page: 100 }),
   getAllocations: (nodeId) => request('GET', `/nodes/${nodeId}/allocations`, undefined, { per_page: 100 })
 };
