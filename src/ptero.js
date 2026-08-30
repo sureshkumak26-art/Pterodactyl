@@ -28,7 +28,7 @@ async function request(method, path, data, params) {
 }
 
 async function getCreateServerResources({ user, node, nest, egg, allocation }) {
-  if (!Number.isInteger(user) || user <= 0) throw new Error('A valid Pterodactyl user ID is required. Use the `member` option for automatic Discord-user lookup, or provide `user` with a valid Pterodactyl ID.');
+  if (!Number.isInteger(user) || user <= 0) throw new Error('A valid Pterodactyl user ID is required.');
   if (!Number.isInteger(node) || node <= 0) throw new Error('A valid node ID is required.');
   if (!Number.isInteger(nest) || nest <= 0) throw new Error('A valid nest ID is required.');
   if (!Number.isInteger(egg) || egg <= 0) throw new Error('A valid egg ID is required.');
@@ -43,8 +43,8 @@ async function getCreateServerResources({ user, node, nest, egg, allocation }) {
 
   const allocations = a.data || [];
   const selectedAllocation = allocations.find(x => Number(x.attributes.id) === Number(allocation));
-  if (!selectedAllocation) throw new Error(`Allocation ${allocation} was not found on node ${node}. Run /allocations node:${node}.`);
-  if (selectedAllocation.attributes.assigned) throw new Error(`Allocation ${allocation} is already assigned. Choose an Available allocation.`);
+  if (!selectedAllocation) throw new Error(`Allocation ${allocation} was not found on node ${node}.`);
+  if (selectedAllocation.attributes.assigned) throw new Error(`Allocation ${allocation} is already assigned.`);
 
   return { user: u.attributes, node: n.attributes, egg: e.attributes, allocation: selectedAllocation.attributes };
 }
@@ -54,11 +54,40 @@ async function findUserByUsername(username) {
   return (result.data || []).find(x => String(x.attributes?.username).toLowerCase() === String(username).toLowerCase()) || null;
 }
 
+function cleanName(value, fallback) {
+  const cleaned = String(value ?? '')
+    .normalize('NFKC')
+    .replace(/[^a-zA-Z0-9 ._-]/g, '')
+    .trim()
+    .slice(0, 191);
+  return cleaned || fallback;
+}
+
+async function createUser(body = {}) {
+  // Pterodactyl requires non-empty first_name and last_name.
+  // Normalize both here so every caller is protected from HTTP 422.
+  const payload = {
+    username: String(body.username || '').trim(),
+    email: String(body.email || '').trim(),
+    first_name: cleanName(body.first_name ?? body.firstName, 'Discord'),
+    last_name: cleanName(body.last_name ?? body.lastName, 'User'),
+    password: String(body.password || ''),
+    root_admin: Boolean(body.root_admin ?? body.rootAdmin ?? false),
+    language: String(body.language || 'en')
+  };
+
+  if (!payload.username) throw new Error('Username is required.');
+  if (!payload.email) throw new Error('Email is required.');
+  if (!payload.password) throw new Error('Password is required.');
+
+  return request('POST', '/users', payload);
+}
+
 module.exports = {
   getUsers: (filter) => request('GET', '/users', undefined, { 'filter[email]': filter || undefined, per_page: 100 }),
   getUser: (id) => request('GET', `/users/${id}`),
   findUserByUsername,
-  createUser: (body) => request('POST', '/users', body),
+  createUser,
   deleteUser: (id) => request('DELETE', `/users/${id}`),
   getServers: () => request('GET', '/servers', undefined, { per_page: 100 }),
   getServer: (id) => request('GET', `/servers/${id}`),
