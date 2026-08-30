@@ -15,12 +15,9 @@ module.exports = [
   new SlashCommandBuilder().setName('user').setDescription('View a user').addIntegerOption(o=>o.setName('id').setDescription('User ID').setRequired(true)),
   new SlashCommandBuilder().setName('users').setDescription('List users'),
 
-  new SlashCommandBuilder().setName('create-server').setDescription('Create a server for a Discord member')
+  new SlashCommandBuilder().setName('create-server').setDescription('Create an automatic Minecraft Paper server')
     .addUserOption(o=>o.setName('member').setDescription('Discord member').setRequired(true))
     .addStringOption(o=>o.setName('name').setDescription('Server name').setRequired(true))
-    .addIntegerOption(o=>o.setName('nest').setDescription('Nest ID').setRequired(true))
-    .addIntegerOption(o=>o.setName('egg').setDescription('Egg ID').setRequired(true))
-    .addIntegerOption(o=>o.setName('allocation').setDescription('Allocation ID').setRequired(true))
     .addIntegerOption(o=>o.setName('memory').setDescription('RAM in MB').setRequired(true))
     .addIntegerOption(o=>o.setName('disk').setDescription('Disk in MB').setRequired(true))
     .addIntegerOption(o=>o.setName('cpu').setDescription('CPU percentage').setRequired(true))
