@@ -2,6 +2,7 @@ const { Client, GatewayIntentBits, REST, Routes, EmbedBuilder } = require('disco
 const config = require('./config');
 const commands = require('./commands');
 const ptero = require('./ptero');
+const crypto = require('crypto');
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
@@ -10,6 +11,20 @@ const ok = (d) => embed('✅ Pterodactyl', d, 0x57f287);
 const fail = (e) => embed('❌ Pterodactyl Error', String(e).slice(0, 3900), 0xed4245);
 const lines = (arr, fn) => arr.length ? arr.slice(0, 50).map(fn).join('\n') : 'No results found.';
 const admin = (i) => i.memberPermissions?.has('Administrator') || i.member?.roles?.cache?.has(config.adminRoleId);
+
+function generatePassword() {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%';
+  const bytes = crypto.randomBytes(18);
+  let password = '';
+  for (let i = 0; i < 18; i++) password += alphabet[bytes[i] % alphabet.length];
+  return password;
+}
+
+function safeUsername(name, discordId) {
+  let value = String(name || 'user').toLowerCase().replace(/[^a-z0-9_.-]/g, '').slice(0, 20);
+  if (value.length < 3) value = `user${discordId.slice(-6)}`;
+  return `${value}-${discordId.slice(-6)}`.slice(0, 32);
+}
 
 async function register() {
   const rest = new REST({ version: '10' }).setToken(config.discordToken);
@@ -29,46 +44,82 @@ client.on('interactionCreate', async (i) => {
   try {
     const c = i.commandName;
 
-    // Help must reply directly. Do NOT defer it, otherwise Discord can remain on "thinking" if a handler exits early.
     if (c === 'help') {
-      return i.reply({
-        embeds: [embed('☁️ Pterodactyl Bot Help', [
-          '**👤 Users**',
-          '`/createuser` — Create a user',
-          '`/user` — View a user',
-          '`/users` — List users',
-          '`/deleteuser` — Delete a user',
-          '',
-          '**🖥️ Servers**',
-          '`/create-server` — Create a server',
-          '`/server` — View a server',
-          '`/servers` — List servers',
-          '`/rename-server` — Rename a server',
-          '`/delete-server` — Delete a server',
-          '`/suspend` — Suspend a server',
-          '`/unsuspend` — Unsuspend a server',
-          '`/start` — Start a server',
-          '`/stop` — Stop a server',
-          '`/restart` — Restart a server',
-          '',
-          '**⚙️ Panel**',
-          '`/nodes` — List nodes',
-          '`/locations` — List locations',
-          '`/nests` — List nests',
-          '`/eggs` — List eggs in a nest',
-          '`/allocations` — List node allocations'
-        ].join('\n'))],
-        ephemeral: true
-      });
+      return i.reply({ embeds: [embed('☁️ Pterodactyl Bot Help', [
+        '**👤 Users**',
+        '`/create-user member:<user>` — Auto-create account and DM credentials',
+        '`/createuser member:<user>` — Legacy alias',
+        '`/user` — View a user',
+        '`/users` — List users',
+        '`/deleteuser` — Delete a user',
+        '',
+        '**🖥️ Servers**',
+        '`/create-server` — Create a server',
+        '`/server` — View a server',
+        '`/servers` — List servers',
+        '`/rename-server` — Rename a server',
+        '`/delete-server` — Delete a server',
+        '`/suspend` — Suspend a server',
+        '`/unsuspend` — Unsuspend a server',
+        '`/start` — Start a server',
+        '`/stop` — Stop a server',
+        '`/restart` — Restart a server',
+        '',
+        '**⚙️ Panel**',
+        '`/nodes` — List nodes',
+        '`/locations` — List locations',
+        '`/nests` — List nests',
+        '`/eggs` — List eggs in a nest',
+        '`/allocations` — List node allocations'
+      ].join('\n'))], ephemeral: true });
     }
 
     await i.deferReply({ ephemeral: true });
 
-    if (c === 'createuser') {
-      const u = await ptero.createUser({ username:i.options.getString('username'), email:i.options.getString('email'), first_name:i.options.getString('firstname'), last_name:i.options.getString('lastname'), password:i.options.getString('password'), root_admin:false, language:'en' });
+    // Automatic Pterodactyl account creation from a Discord member.
+    // Discord bots cannot read a user's private Discord email, so an email is either
+    // supplied explicitly or generated from the configured PTERO_EMAIL_DOMAIN.
+    if (c === 'create-user' || c === 'createuser') {
+      const member = i.options.getUser('member', true);
+      const suppliedEmail = i.options.getString('email');
+      const username = safeUsername(member.username, member.id);
+      const email = suppliedEmail || `${username}@${config.emailDomain}`;
+      const password = generatePassword();
+      const firstName = (member.globalName || member.username || 'Discord').replace(/[^a-zA-Z0-9 ._-]/g, '').trim().slice(0, 191) || 'Discord';
+      const lastName = `Discord-${member.id.slice(-6)}`;
+
+      const u = await ptero.createUser({
+        username,
+        email,
+        first_name: firstName,
+        last_name: lastName,
+        password,
+        root_admin: false,
+        language: 'en'
+      });
+
       const a = u.attributes;
-      return i.editReply({ embeds:[ok(`User created\n**ID:** ${a.id}\n**Username:** ${a.username}\n**Email:** ${a.email}`)] });
+      const dm = embed('☁️ Your Pterodactyl Account', [
+        'Your Pterodactyl account has been created.',
+        '',
+        `**Panel:** ${config.pteroUrl}`,
+        `**Username:** \`${a.username}\``,
+        `**Email:** \`${a.email}\``,
+        `**Password:** \`${password}\``,
+        `**Pterodactyl User ID:** \`${a.id}\``,
+        '',
+        '🔐 Keep these credentials private and change your password after your first login if your panel allows it.'
+      ].join('\n'), 0x62d9ff);
+
+      try {
+        await member.send({ embeds: [dm] });
+        return i.editReply({ embeds: [ok(`Pterodactyl user created for **${member.tag}**.\n\n**User ID:** ${a.id}\n**Username:** ${a.username}\n\n📩 All login details were sent to the member's Discord DM.`)] });
+      } catch (dmError) {
+        console.error('DM failed:', dmError);
+        return i.editReply({ embeds: [embed('⚠️ User Created — DM Failed', `The Pterodactyl account **${a.username}** was created, but Discord could not send the credentials to **${member.tag}**.\n\nAsk the user to enable DMs and run the command again only after removing the existing Pterodactyl account, or use the panel's password reset flow.\n\n**User ID:** ${a.id}`, 0xfee75c)] });
+      }
     }
+
     if (c === 'deleteuser') { const id=i.options.getInteger('id'); await ptero.deleteUser(id); return i.editReply({embeds:[ok(`User **${id}** deleted.`)]}); }
     if (c === 'user') { const a=(await ptero.getUser(i.options.getInteger('id'))).attributes; return i.editReply({embeds:[embed(`User #${a.id}`,`**Username:** ${a.username}\n**Email:** ${a.email}\n**Name:** ${a.first_name} ${a.last_name}\n**Root admin:** ${a.root_admin ? 'Yes':'No'}`)]}); }
     if (c === 'users') { const d=(await ptero.getUsers()).data||[]; return i.editReply({embeds:[embed('Pterodactyl Users',lines(d,x=>{const a=x.attributes;return `**${a.id}** — ${a.username} — ${a.email}`;}))]}); }
