@@ -12,5 +12,6 @@ module.exports = {
   guildId: required('GUILD_ID'),
   pteroUrl: required('PTERO_URL').replace(/\/+$/, ''),
   pteroApiKey: required('PTERO_API_KEY'),
-  adminRoleId: required('ADMIN_ROLE_ID')
+  adminRoleId: required('ADMIN_ROLE_ID'),
+  emailDomain: process.env.PTERO_EMAIL_DOMAIN || 'example.com'
 };
