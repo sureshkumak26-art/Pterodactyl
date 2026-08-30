@@ -2,12 +2,12 @@ const { SlashCommandBuilder } = require('discord.js');
 
 module.exports = [
   new SlashCommandBuilder().setName('help').setDescription('Show all Pterodactyl bot commands'),
-  new SlashCommandBuilder().setName('createuser').setDescription('Create a Pterodactyl user')
-    .addStringOption(o=>o.setName('username').setDescription('Username').setRequired(true))
-    .addStringOption(o=>o.setName('email').setDescription('Email address').setRequired(true))
-    .addStringOption(o=>o.setName('firstname').setDescription('First name').setRequired(true))
-    .addStringOption(o=>o.setName('lastname').setDescription('Last name').setRequired(true))
-    .addStringOption(o=>o.setName('password').setDescription('Password').setRequired(true)),
+  new SlashCommandBuilder().setName('create-user').setDescription('Create a Pterodactyl user automatically from a Discord member')
+    .addUserOption(o=>o.setName('member').setDescription('Discord member').setRequired(true))
+    .addStringOption(o=>o.setName('email').setDescription('Optional email').setRequired(false)),
+  new SlashCommandBuilder().setName('createuser').setDescription('Legacy alias for automatic user creation')
+    .addUserOption(o=>o.setName('member').setDescription('Discord member').setRequired(true))
+    .addStringOption(o=>o.setName('email').setDescription('Optional email').setRequired(false)),
   new SlashCommandBuilder().setName('deleteuser').setDescription('Delete a user').addIntegerOption(o=>o.setName('id').setDescription('User ID').setRequired(true)),
   new SlashCommandBuilder().setName('user').setDescription('View a user').addIntegerOption(o=>o.setName('id').setDescription('User ID').setRequired(true)),
   new SlashCommandBuilder().setName('users').setDescription('List users'),
