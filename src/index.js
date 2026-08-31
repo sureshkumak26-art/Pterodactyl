@@ -2,6 +2,7 @@ const { Client, GatewayIntentBits, REST, Routes, EmbedBuilder } = require('disco
 const config = require('./config');
 const commands = require('./commands');
 const ptero = require('./ptero');
+const expiry = require('./expiry');
 const crypto = require('crypto');
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
@@ -17,11 +18,12 @@ async function ensureUser(member){
   const u=username(member); const existing=await ptero.findUserByUsername(u);
   if(existing)return {user:existing.attributes,created:false,password:null};
   const pass=password();
-  const created=await ptero.createUser({username:u,email:`${u}@${config.emailDomain}`,first_name:(member.globalName||member.username||'Discord').replace(/[^a-zA-Z0-9 ._-]/g,'').slice(0,191)||'Discord',last_name:`Discord-${member.id.slice(-6)}`,password:pass,root_admin:false,language:'en'});
+  const first=(member.globalName||member.username||'Discord').replace(/[^a-zA-Z0-9 ._-]/g,'').trim().slice(0,191)||'Discord';
+  const created=await ptero.createUser({username:u,email:`${u}@${config.emailDomain}`,first_name:first,last_name:`Discord-${member.id.slice(-6)}`,password:pass,root_admin:false,language:'en'});
   return {user:created.attributes,created:true,password:pass};
 }
 
-async function sendServerDM(member, account, server, node, allocation, memory, disk, cpu){
+async function sendServerDM(member, account, server, node, allocation, memory, disk, cpu, expiresAt){
   try{
     const lines=[
       '☁️ **Your Minecraft Paper Server is Ready!**','',
@@ -30,10 +32,36 @@ async function sendServerDM(member, account, server, node, allocation, memory, d
       account.created ? `**Password:** \`${account.password}\`` : '**Password:** Your existing password','',
       `**Server ID:** \`${server.id}\``,`**Server Name:** \`${server.name}\``,`**Identifier:** \`${server.identifier}\``,
       `**Node:** \`${node.name}\``,`**Allocation:** \`${allocation.ip}:${allocation.port}\``,`**RAM:** ${memory} MB`,`**Disk:** ${disk} MB`,`**CPU:** ${cpu}%`,`**Software:** Minecraft Paper`,
-      '','🔐 Keep your login details private.'
+      `**Expires:** <t:${Math.floor(new Date(expiresAt).getTime()/1000)}:F>`,`**Time Left:** <t:${Math.floor(new Date(expiresAt).getTime()/1000)}:R>`,
+      '','⚠️ When the expiry time is reached, this server will be **automatically deleted**.','🔐 Keep your login details private.'
     ];
     await member.send({embeds:[embed('🎮 Minecraft Paper Server Details',lines.join('\n'),0x62d9ff)]}); return true;
   }catch(e){console.error('Server DM failed:',e.message);return false;}
+}
+
+async function notifyExpiry(discordId, serverName, serverId){
+  if(!discordId)return;
+  try{
+    const user=await client.users.fetch(discordId);
+    await user.send({embeds:[embed('🗑️ Server Expired',`Your Minecraft Paper server **${serverName}** (ID: **${serverId}**) has expired and was automatically deleted.`,0xed4245)]});
+  }catch(e){console.error('Expiry DM failed:',e.message);}
+}
+
+async function checkExpirations(){
+  const entries=expiry.all();
+  for(const [serverId,record] of Object.entries(entries)){
+    if(!record?.expiresAt || new Date(record.expiresAt).getTime()>Date.now())continue;
+    try{
+      const server=(await ptero.getServer(Number(serverId))).attributes;
+      await ptero.deleteServer(Number(serverId),true);
+      await notifyExpiry(record.discordId,server.name,server.id);
+      expiry.remove(serverId);
+      console.log(`Expired server ${serverId} automatically deleted.`);
+    }catch(e){
+      if(/404/.test(e.message)){expiry.remove(serverId);continue;}
+      console.error(`Expiry deletion failed for server ${serverId}:`,e.message);
+    }
+  }
 }
 
 async function register(){const rest=new REST({version:'10'}).setToken(config.discordToken);await rest.put(Routes.applicationGuildCommands(config.clientId,config.guildId),{body:commands.map(x=>x.toJSON())});console.log('Slash commands registered.');}
@@ -44,13 +72,13 @@ client.on('interactionCreate',async i=>{
  if(!admin(i))return i.reply({embeds:[fail('You do not have permission to use this command.')],ephemeral:true});
  try{
   const c=i.commandName;
-  if(c==='help')return i.reply({embeds:[embed('☁️ Pterodactyl Bot Help','`/create-user` — Create account for a selected member\n`/create-server` — Create Minecraft Paper server; node, nest, egg and allocation are automatic\n`/users` `/user` `/deleteuser`\n`/servers` `/server` `/delete-server` `/rename-server`\n`/start` `/stop` `/restart` `/suspend` `/unsuspend`\n`/nodes` `/locations` `/nests` `/eggs` `/allocations`')],ephemeral:true});
+  if(c==='help')return i.reply({embeds:[embed('☁️ Pterodactyl Bot Help','`/create-user` — Create account\n`/create-server` — Create Minecraft Paper server with expiry time\n`/expiry` — View server expiry\n`/users` `/user` `/deleteuser`\n`/servers` `/server` `/delete-server` `/rename-server`\n`/start` `/stop` `/restart` `/suspend` `/unsuspend`\n`/nodes` `/locations` `/nests` `/eggs` `/allocations`')],ephemeral:true});
   await i.deferReply({ephemeral:true});
 
   if(c==='create-user'||c==='createuser'){
     const member=i.options.getUser('member',true); const email=i.options.getString('email'); const u=username(member); const existing=await ptero.findUserByUsername(u);
     if(existing)return i.editReply({embeds:[embed('⚠️ Already Exists',`**Discord:** ${member.tag}\n**User ID:** ${existing.attributes.id}\n**Username:** ${existing.attributes.username}`,0xfee75c)]});
-    const pass=password(); const created=await ptero.createUser({username:u,email:email||`${u}@${config.emailDomain}`,first_name:(member.globalName||member.username||'Discord').replace(/[^a-zA-Z0-9 ._-]/g,'').slice(0,191)||'Discord',last_name:`Discord-${member.id.slice(-6)}`,password:pass,root_admin:false,language:'en'}); const a=created.attributes;
+    const pass=password(); const first=(member.globalName||member.username||'Discord').replace(/[^a-zA-Z0-9 ._-]/g,'').trim().slice(0,191)||'Discord'; const created=await ptero.createUser({username:u,email:email||`${u}@${config.emailDomain}`,first_name:first,last_name:`Discord-${member.id.slice(-6)}`,password:pass,root_admin:false,language:'en'}); const a=created.attributes;
     try{await member.send({embeds:[embed('☁️ Your Pterodactyl Account',[`**Panel:** ${config.pteroUrl}`,`**Discord:** ${member.tag}`,`**Username:** \`${a.username}\``,`**Email:** \`${a.email}\``,`**Password:** \`${pass}\``,`**User ID:** \`${a.id}\``, '', '🔐 Keep these credentials private.'].join('\n'),0x62d9ff)]});return i.editReply({embeds:[ok(`Account created for **${member.tag}**.\n📩 Login details sent by DM.`)]});}catch(e){return i.editReply({embeds:[embed('⚠️ Created — DM Failed',`Account **${a.username}** created, but Discord blocked the DM.\n**User ID:** ${a.id}`,0xfee75c)]});}
   }
   if(c==='deleteuser'){const id=i.options.getInteger('id',true);await ptero.deleteUser(id);return i.editReply({embeds:[ok(`User **${id}** deleted.`)]});}
@@ -58,46 +86,28 @@ client.on('interactionCreate',async i=>{
   if(c==='users'){const d=(await ptero.getUsers()).data||[];return i.editReply({embeds:[embed('Pterodactyl Users',list(d,x=>{const a=x.attributes;return `**${a.id}** — ${a.username} — ${a.email}`;}))]});}
 
   if(c==='create-server'){
-    const member=i.options.getUser('member',true);
-    const name=i.options.getString('name',true);
-    const memory=i.options.getInteger('memory',true);
-    const disk=i.options.getInteger('disk',true);
-    const cpu=i.options.getInteger('cpu',true);
-    const backups=i.options.getInteger('backups')||0;
-
-    const account=await ensureUser(member);
-    const nodes=(await ptero.getNodes()).data||[];
-    if(!nodes.length)throw new Error('No Pterodactyl nodes found.');
-    const node=nodes.find(x=>!x.attributes.maintenance)||nodes[0];
-    const nodeId=Number(node.attributes.id);
-    const allocations=(await ptero.getAllocations(nodeId)).data||[];
-    const autoAllocation=allocations.find(x=>!x.attributes.assigned);
-    if(!autoAllocation)throw new Error(`No available allocation on node ${node.attributes.name}.`);
-    const allocation=autoAllocation.attributes;
-
-    // Find the Minecraft Paper egg automatically. Prefer an egg named Paper/PaperMC.
-    const nests=(await ptero.getNests()).data||[];
-    let paper=null;
-    for(const item of nests){
-      const eggs=item.attributes?.relationships?.eggs?.data || item.relationships?.eggs?.data || [];
-      const match=eggs.find(x=>/paper|papermc/i.test(String(x.attributes?.name||x.attributes?.slug||'')));
-      if(match){paper={nestId:Number(item.attributes.id),eggId:Number(match.attributes.id)};break;}
-    }
+    const member=i.options.getUser('member',true); const name=i.options.getString('name',true); const memory=i.options.getInteger('memory',true); const disk=i.options.getInteger('disk',true); const cpu=i.options.getInteger('cpu',true); const days=i.options.getInteger('days',true); const backups=i.options.getInteger('backups')||0;
+    const account=await ensureUser(member); const nodes=(await ptero.getNodes()).data||[]; if(!nodes.length)throw new Error('No Pterodactyl nodes found.'); const node=nodes.find(x=>!x.attributes.maintenance)||nodes[0]; const nodeId=Number(node.attributes.id);
+    const allocations=(await ptero.getAllocations(nodeId)).data||[]; const autoAllocation=allocations.find(x=>!x.attributes.assigned); if(!autoAllocation)throw new Error(`No available allocation on node ${node.attributes.name}.`); const allocation=autoAllocation.attributes;
+    const nests=(await ptero.getNests()).data||[]; let paper=null;
+    for(const item of nests){const eggs=item.attributes?.relationships?.eggs?.data || item.relationships?.eggs?.data || []; const match=eggs.find(x=>/paper|papermc/i.test(String(x.attributes?.name||x.attributes?.slug||''))); if(match){paper={nestId:Number(item.attributes.id),eggId:Number(match.attributes.id)};break;}}
     if(!paper)throw new Error('Minecraft Paper egg was not found. Install/enable a Paper egg in your Pterodactyl panel.');
-
-    const r=await ptero.getCreateServerResources({user:Number(account.user.id),node:nodeId,nest:paper.nestId,egg:paper.eggId,allocation:Number(allocation.id)});
-    const ed=r.egg; const env={};
+    const r=await ptero.getCreateServerResources({user:Number(account.user.id),node:nodeId,nest:paper.nestId,egg:paper.eggId,allocation:Number(allocation.id)}); const ed=r.egg; const env={};
     for(const x of ed.relationships?.variables?.data||[]){const v=x.attributes||{};if(v.env_variable&&v.default_value!==undefined&&v.default_value!==null)env[v.env_variable]=String(v.default_value);}
     const server=(await ptero.createServer({name,user:Number(account.user.id),node:nodeId,nest:paper.nestId,egg:paper.eggId,docker_image:ed.docker_image,startup:ed.startup,environment:env,limits:{memory,swap:0,disk,io:500,cpu,threads:null},feature_limits:{databases:0,allocations:1,backups},allocation:{default:Number(allocation.id)}})).attributes;
-    const dm=await sendServerDM(member,account,server,node.attributes,allocation,memory,disk,cpu);
-    return i.editReply({embeds:[ok(`**Minecraft Paper server created!**\n\n**Discord:** ${member.tag}\n**Server:** ${server.name}\n**Server ID:** ${server.id}\n**Node:** ${node.attributes.name}\n**Nest:** ${paper.nestId}\n**Paper Egg:** ${paper.eggId}\n**Allocation:** ${allocation.ip}:${allocation.port}\n**RAM:** ${memory} MB\n**Disk:** ${disk} MB\n**CPU:** ${cpu}%\n${dm?'📩 All server/login details sent by DM.':'⚠️ Server created, but the user could not receive a DM.'}${account.created?'\n👤 Pterodactyl account created automatically.':''}`)]});
+    const expiresAt=new Date(Date.now()+days*86400000); expiry.set(server.id,expiresAt,member.id);
+    const dm=await sendServerDM(member,account,server,node.attributes,allocation,memory,disk,cpu,expiresAt);
+    return i.editReply({embeds:[ok(`**Minecraft Paper server created!**\n\n**Discord:** ${member.tag}\n**Server:** ${server.name}\n**Server ID:** ${server.id}\n**Node:** ${node.attributes.name}\n**Paper Egg:** ${paper.eggId}\n**Allocation:** ${allocation.ip}:${allocation.port}\n**RAM:** ${memory} MB\n**Disk:** ${disk} MB\n**CPU:** ${cpu}%\n**Expires:** <t:${Math.floor(expiresAt.getTime()/1000)}:F>\n**Time:** ${days} day(s)\n\n🗑️ Server will be **automatically deleted** at expiry.\n${dm?'📩 All server/login details sent by DM.':'⚠️ Server created, but the user could not receive a DM.'}${account.created?'\n👤 Pterodactyl account created automatically.':''}`)]});
   }
 
-  if(c==='delete-server'){const id=i.options.getInteger('id',true);await ptero.deleteServer(id,i.options.getBoolean('force')||false);return i.editReply({embeds:[ok(`Server **${id}** deleted.`)]});}
-  if(c==='server'){const a=(await ptero.getServer(i.options.getInteger('id',true))).attributes;return i.editReply({embeds:[embed(`Server #${a.id}`,`**Name:** ${a.name}\n**Identifier:** ${a.identifier}\n**Node:** ${a.node}\n**RAM:** ${a.limits.memory} MB\n**Disk:** ${a.limits.disk} MB\n**CPU:** ${a.limits.cpu}%\n**Suspended:** ${a.suspended?'Yes':'No'}`)]});}
-  if(c==='servers'){const d=(await ptero.getServers()).data||[];return i.editReply({embeds:[embed('Pterodactyl Servers',list(d,x=>{const a=x.attributes;return `**${a.id}** — ${a.name} — \`${a.identifier}\``;}))]});}
+  if(c==='expiry'){
+    const id=i.options.getInteger('id',true); const r=expiry.get(id); if(!r)return i.editReply({embeds:[embed('ℹ️ No Expiry',`Server **${id}** has no automatic expiry configured.`,0xfee75c)]}); const t=new Date(r.expiresAt); return i.editReply({embeds:[embed('⏳ Server Expiry',`**Server:** ${id}\n**Expires:** <t:${Math.floor(t.getTime()/1000)}:F>\n**Time left:** <t:${Math.floor(t.getTime()/1000)}:R>\n\n🗑️ It will be **automatically deleted** when the timer reaches zero.`)]});
+  }
+  if(c==='delete-server'){const id=i.options.getInteger('id',true);await ptero.deleteServer(id,i.options.getBoolean('force')||false);expiry.remove(id);return i.editReply({embeds:[ok(`Server **${id}** deleted.`)]});}
+  if(c==='server'){const id=i.options.getInteger('id',true);const a=(await ptero.getServer(id)).attributes;const ex=expiry.get(id);return i.editReply({embeds:[embed(`Server #${a.id}`,`**Name:** ${a.name}\n**Identifier:** ${a.identifier}\n**Node:** ${a.node}\n**RAM:** ${a.limits.memory} MB\n**Disk:** ${a.limits.disk} MB\n**CPU:** ${a.limits.cpu}%\n**Suspended:** ${a.suspended?'Yes':'No'}\n**Expires:** ${ex?`<t:${Math.floor(new Date(ex.expiresAt).getTime()/1000)}:F>`:'Never'}`)]});}
+  if(c==='servers'){const d=(await ptero.getServers()).data||[];return i.editReply({embeds:[embed('Pterodactyl Servers',list(d,x=>{const a=x.attributes;const ex=expiry.get(a.id);return `**${a.id}** — ${a.name} — \`${a.identifier}\`${ex?` — expires <t:${Math.floor(new Date(ex.expiresAt).getTime()/1000)}:R>`:''}`;}))]});}
   if(c==='rename-server'){const id=i.options.getInteger('id',true);await ptero.updateServerDetails(id,{name:i.options.getString('name',true)});return i.editReply({embeds:[ok(`Server **${id}** renamed.`)]});}
-  if(['start','stop','restart'].includes(c)){const id=i.options.getInteger('id',true);await ptero.power(id,c);return i.editReply({embeds:[ok(`${c} signal sent to server **${id}**.`)]});}
+  if(['start','stop','restart'].includes(c)){const id=i.options.getInteger('id',true);const ex=expiry.get(id);if(ex&&new Date(ex.expiresAt).getTime()<=Date.now())throw new Error('This server has expired and will be deleted automatically.');await ptero.power(id,c);return i.editReply({embeds:[ok(`${c} signal sent to server **${id}**.`)]});}
   if(c==='suspend'||c==='unsuspend'){const id=i.options.getInteger('id',true);await ptero[`${c}Server`](id);return i.editReply({embeds:[ok(`Server **${id}** ${c}ed.`)]});}
   if(c==='nodes'){const d=(await ptero.getNodes()).data||[];return i.editReply({embeds:[embed('Nodes',list(d,x=>{const a=x.attributes;return `**${a.id}** — ${a.name} — ${a.fqdn}`;}))]});}
   if(c==='locations'){const d=(await ptero.getLocations()).data||[];return i.editReply({embeds:[embed('Locations',list(d,x=>{const a=x.attributes;return `**${a.id}** — ${a.short} — ${a.long}`;}))]});}
@@ -108,4 +118,4 @@ client.on('interactionCreate',async i=>{
  }catch(e){console.error(e);if(i.deferred||i.replied)return i.editReply({embeds:[fail(e.message)]});return i.reply({embeds:[fail(e.message)],ephemeral:true});}
 });
 
-(async()=>{try{await register();await client.login(config.discordToken);}catch(e){console.error(e);process.exit(1);}})();
+(async()=>{try{await register();await client.login(config.discordToken);await checkExpirations();setInterval(checkExpirations,60*1000);}catch(e){console.error(e);process.exit(1);}})();
