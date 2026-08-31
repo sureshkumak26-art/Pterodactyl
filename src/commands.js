@@ -2,25 +2,23 @@ const { SlashCommandBuilder } = require('discord.js');
 
 module.exports = [
   new SlashCommandBuilder().setName('help').setDescription('Show all Pterodactyl bot commands'),
-
   new SlashCommandBuilder().setName('create-user').setDescription('Create a Pterodactyl user for a Discord member')
     .addUserOption(o=>o.setName('member').setDescription('Discord member').setRequired(true))
     .addStringOption(o=>o.setName('email').setDescription('Optional email').setRequired(false)),
-
   new SlashCommandBuilder().setName('createuser').setDescription('Legacy alias for user creation')
     .addUserOption(o=>o.setName('member').setDescription('Discord member').setRequired(true))
     .addStringOption(o=>o.setName('email').setDescription('Optional email').setRequired(false)),
-
   new SlashCommandBuilder().setName('deleteuser').setDescription('Delete a user').addIntegerOption(o=>o.setName('id').setDescription('User ID').setRequired(true)),
   new SlashCommandBuilder().setName('user').setDescription('View a user').addIntegerOption(o=>o.setName('id').setDescription('User ID').setRequired(true)),
   new SlashCommandBuilder().setName('users').setDescription('List users'),
 
-  new SlashCommandBuilder().setName('create-server').setDescription('Create an automatic Minecraft Paper server')
+  new SlashCommandBuilder().setName('create-server').setDescription('Create a Minecraft Paper server with automatic expiry')
     .addUserOption(o=>o.setName('member').setDescription('Discord member').setRequired(true))
     .addStringOption(o=>o.setName('name').setDescription('Server name').setRequired(true))
     .addIntegerOption(o=>o.setName('memory').setDescription('RAM in MB').setRequired(true))
     .addIntegerOption(o=>o.setName('disk').setDescription('Disk in MB').setRequired(true))
     .addIntegerOption(o=>o.setName('cpu').setDescription('CPU percentage').setRequired(true))
+    .addIntegerOption(o=>o.setName('days').setDescription('Server lifetime in days').setRequired(true).setMinValue(1).setMaxValue(3650))
     .addIntegerOption(o=>o.setName('backups').setDescription('Backup limit').setRequired(false)),
 
   new SlashCommandBuilder().setName('delete-server').setDescription('Delete a server').addIntegerOption(o=>o.setName('id').setDescription('Server ID').setRequired(true)).addBooleanOption(o=>o.setName('force').setDescription('Force delete').setRequired(false)),
