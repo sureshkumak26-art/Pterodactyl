@@ -1,5 +1,10 @@
 const axios = require('axios');
+const dns = require('dns');
 const config = require('./config');
+
+// Prefer IPv4. This prevents Node from trying unreachable IPv6 routes first
+// on VPS hosts that have broken/disabled IPv6 connectivity.
+dns.setDefaultResultOrder('ipv4first');
 
 const api = axios.create({
   baseURL: `${config.pteroUrl}/api/application`,
@@ -8,7 +13,8 @@ const api = axios.create({
     Accept: 'Application/vnd.pterodactyl.v1+json',
     'Content-Type': 'application/json'
   },
-  timeout: 30000
+  timeout: 30000,
+  family: 4
 });
 
 async function request(method, path, data, params) {
@@ -64,8 +70,6 @@ function cleanName(value, fallback) {
 }
 
 async function createUser(body = {}) {
-  // Pterodactyl requires non-empty first_name and last_name.
-  // Normalize both here so every caller is protected from HTTP 422.
   const payload = {
     username: String(body.username || '').trim(),
     email: String(body.email || '').trim(),
